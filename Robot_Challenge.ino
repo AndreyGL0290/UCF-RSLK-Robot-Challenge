@@ -19,16 +19,20 @@ uint16_t sensorCalVal[LS_NUM_SENSORS];
 uint16_t sensorMaxVal[LS_NUM_SENSORS] = {2500, 2500, 2500, 2500, 2500, 2500, 2500, 2500};
 uint16_t sensorMinVal[LS_NUM_SENSORS] = {805, 1047, 759, 955, 790, 1154, 931, 1245};
 
-#define GOAL 3500       // value of normalized light sensor to follow
+#define GOAL 3500             // value of normalized light sensor to follow
 #define BASE_SPEED 25         // Default speed of the robot
 #define TURN_SPEED 10         // Default turn speed
 #define P_FOLLOW 0.02         // Proportional constant for line following
-#define P_GYRO_DRIVE 5.0      // Proportional constant for gyro heading following
+#define D_FOLLOW 0.01         // Derivative constant for line following
+#define P_GYRO_DRIVE 1.0      // Proportional constant for gyro heading following
+#define D_GYRO_DRIVE 0.1      // Derivative constant for gyro heading following
 #define TURN_COUNT 350        // Counts to turn
-#define DESIRED_HEADING 180     // Heading to return on (figure it out) // angle to hit after gyro reset is 1)arctan(60/x); 2)-arctan(60/x)
+#define DESIRED_HEADING 180   // Heading to return on (figure it out) // angle to hit after gyro reset is 1)arctan(60/x); 2)-arctan(60/x)
 
 float crashedCount;
 int currentCount;
+float lastError = 0.0; // Used to calculate the D part of the PD controller for following the line
+float lastHeadingError = 0.0; // Used to calculate the D part of the PD controller for following the heading
 unsigned long lastTime = 0;
 String btnMsg = " ";
 
@@ -112,7 +116,7 @@ void loop()
 
     // Follow the line
     case FOLLOW:
-      follow(P_FOLLOW,BASE_SPEED);
+      follow(P_FOLLOW,D_FOLLOW,BASE_SPEED);
       if (crashed()) {
          state = CRASH;
       }
@@ -155,7 +159,8 @@ void loop()
     break;
 
     case GYRO_HOME:
-      if (driveToDistanceHeading(P_GYRO_DRIVE,61,17,BASE_SPEED)) { // Heading is either theta or -theta
+      // Should just drive straight home
+      if (driveToDistanceHeading(P_GYRO_DRIVE,D_GYRO_DRIVE,60,0,BASE_SPEED)) { // Heading is either theta or -theta
         state = DONE;
       };
     break;
@@ -168,7 +173,7 @@ void loop()
     break;
 
     case FOLLOW_HOME:
-      follow(P_FOLLOW+.01,BASE_SPEED+10);   // Follow a little faster on the way back
+      follow(P_FOLLOW+.01,D_FOLLOW,BASE_SPEED+10);   // Follow a little faster on the way back
     break;
 
     case DONE:	/* Halt motors */
@@ -188,7 +193,7 @@ boolean crashed()
  return (isBumpSwitchPressed(2) || isBumpSwitchPressed(3));
 }
 
-void follow(float myP, int myBaseSpeed)
+void follow(float kP, float kD, int myBaseSpeed)
 {
 	/* Valid values are either:
 	 *  DARK_LINE  if your floor is lighter than your line
@@ -210,9 +215,10 @@ void follow(float myP, int myBaseSpeed)
 
 	uint32_t linePos = getLinePosition(sensorCalVal,lineColor);
 
-  /* use PID algorithm to calculate speed delta */
+  /* Propotional part of the PD controller */
   int error = linePos - GOAL;
-  int motor_speed_delta = myP * error;
+  int motor_speed_delta = kP*error + kD*(error-lastError);
+  lastError = error
     Serial.print(linePos);
     Serial.print(", ");
     Serial.print(error);
@@ -220,6 +226,7 @@ void follow(float myP, int myBaseSpeed)
     Serial.print(motor_speed_delta);
     Serial.println();
 
+  /* Derivative part of the PD controller */
   /* add and subtract delta from left and right sides.  Cap motors at 100 */
   int temp = myBaseSpeed + motor_speed_delta;
   int left_motor_speed = (temp > 100) ? 100 : temp; 
@@ -233,13 +240,14 @@ void follow(float myP, int myBaseSpeed)
 /*
  * Drive distance
  */
-boolean driveToDistanceHeading(float myP, float inches, int desiredHeading, int speed) {
+boolean driveToDistanceHeading(float kP, float kD, float inches, int desiredHeading, int speed) {
   uint16_t ticks = distanceToEncoder(wheelDiameter, cntPerRevolution, inches);
 
   int headingError = calculateDifferenceBetweenAngles(desiredHeading, getCurrentRealtiveHeadingToStart());
   Serial.print("Drive: Heading Error");
   Serial.println(headingError);
-  int adjustSpeed = headingError * myP;
+  int adjustSpeed = headingError * kP + kD * lastHeadingError;
+  lastHeadingError = headingError;
   adjustSpeed = constrain(adjustSpeed,-10,10);
   /* Set motor speed */
   setMotorDirection(LEFT_MOTOR,MOTOR_DIR_FORWARD);   
