@@ -20,12 +20,12 @@ uint16_t sensorMaxVal[LS_NUM_SENSORS] = {2500, 2500, 2500, 2500, 2500, 2500, 250
 uint16_t sensorMinVal[LS_NUM_SENSORS] = {805, 1047, 759, 955, 790, 1154, 931, 1245};
 
 #define GOAL 3500             // value of normalized light sensor to follow
-#define BASE_SPEED 25         // Default speed of the robot
-#define TURN_SPEED 10         // Default turn speed
-#define P_FOLLOW 0.02         // Proportional constant for line following
-#define D_FOLLOW 0.01         // Derivative constant for line following
-#define P_GYRO_DRIVE 1.0      // Proportional constant for gyro heading following
-#define D_GYRO_DRIVE 0.1      // Derivative constant for gyro heading following
+#define BASE_SPEED 30         // Default speed of the robot // 30
+#define TURN_SPEED 20         // Default turn speed
+#define P_FOLLOW 0.03         // Proportional constant for line following // 0.03
+#define D_FOLLOW 0.01         // Derivative constant for line following // 0.01 (bump it up a little bit)
+#define P_GYRO_DRIVE 5.0      // Proportional constant for gyro heading following
+#define D_GYRO_DRIVE 2.5      // Derivative constant for gyro heading following
 #define TURN_COUNT 350        // Counts to turn
 #define DESIRED_HEADING 180   // Heading to return on (figure it out) // angle to hit after gyro reset is 1)arctan(60/x); 2)-arctan(60/x)
 
@@ -144,7 +144,7 @@ void loop()
     break;
 
     case TURN_GYRO:
-      if (turnTo(180,TURN_SPEED)) { // Turning backwards and then reseting gyro
+      if (turnTo(210,TURN_SPEED)) { // Turning backwards and then reseting gyro
         state = RESET_TURN;
       }
     break;
@@ -160,7 +160,7 @@ void loop()
 
     case GYRO_HOME:
       // Should just drive straight home
-      if (driveToDistanceHeading(P_GYRO_DRIVE,D_GYRO_DRIVE,60,0,BASE_SPEED)) { // Heading is either theta or -theta
+      if (driveToDistanceHeading(P_GYRO_DRIVE,D_GYRO_DRIVE,60,210-30,BASE_SPEED)) { // Heading is either theta or -theta
         state = DONE;
       };
     break;
@@ -215,10 +215,11 @@ void follow(float kP, float kD, int myBaseSpeed)
 
 	uint32_t linePos = getLinePosition(sensorCalVal,lineColor);
 
-  /* Propotional part of the PD controller */
+  /* PD controller error calculation */
   int error = linePos - GOAL;
   int motor_speed_delta = kP*error + kD*(error-lastError);
-  lastError = error
+  lastError = error;
+    
     Serial.print(linePos);
     Serial.print(", ");
     Serial.print(error);
@@ -226,7 +227,6 @@ void follow(float kP, float kD, int myBaseSpeed)
     Serial.print(motor_speed_delta);
     Serial.println();
 
-  /* Derivative part of the PD controller */
   /* add and subtract delta from left and right sides.  Cap motors at 100 */
   int temp = myBaseSpeed + motor_speed_delta;
   int left_motor_speed = (temp > 100) ? 100 : temp; 
@@ -246,8 +246,10 @@ boolean driveToDistanceHeading(float kP, float kD, float inches, int desiredHead
   int headingError = calculateDifferenceBetweenAngles(desiredHeading, getCurrentRealtiveHeadingToStart());
   Serial.print("Drive: Heading Error");
   Serial.println(headingError);
+
   int adjustSpeed = headingError * kP + kD * lastHeadingError;
   lastHeadingError = headingError;
+  
   adjustSpeed = constrain(adjustSpeed,-10,10);
   /* Set motor speed */
   setMotorDirection(LEFT_MOTOR,MOTOR_DIR_FORWARD);   
