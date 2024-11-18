@@ -20,19 +20,23 @@ uint16_t sensorMaxVal[LS_NUM_SENSORS] = {2500, 2500, 2500, 2500, 2500, 2500, 250
 uint16_t sensorMinVal[LS_NUM_SENSORS] = {805, 1047, 759, 955, 790, 1154, 931, 1245};
 
 #define GOAL 3500             // value of normalized light sensor to follow
-#define BASE_SPEED 30         // Default speed of the robot // 30
+#define BASE_SPEED 45         // Default speed of the robot // 45 (without a launcher)
 #define TURN_SPEED 20         // Default turn speed
-#define P_FOLLOW 0.03         // Proportional constant for line following // 0.03
-#define D_FOLLOW 0.01         // Derivative constant for line following // 0.01 (bump it up a little bit)
-#define P_GYRO_DRIVE 5.0      // Proportional constant for gyro heading following
-#define D_GYRO_DRIVE 2.5      // Derivative constant for gyro heading following
+#define P_FOLLOW 0.0375       // Proportional constant for line following // 0.04 (without a launcher)
+#define I_FOLLOW 0.0          // Integral gain for line following
+#define D_FOLLOW 0.0375       // Derivative gain for line following // 0.04 (without a launcher)
+#define P_GYRO_DRIVE 5.0      // Proportional gain for gyro heading following
+#define I_GYRO_DRIVE 0.0      // Integral gain for gyro heading following
+#define D_GYRO_DRIVE 2.5      // Derivative gain for gyro heading following
 #define TURN_COUNT 350        // Counts to turn
 #define DESIRED_HEADING 180   // Heading to return on (figure it out) // angle to hit after gyro reset is 1)arctan(60/x); 2)-arctan(60/x)
 
 float crashedCount;
 int currentCount;
-float lastError = 0.0; // Used to calculate the D part of the PD controller for following the line
-float lastHeadingError = 0.0; // Used to calculate the D part of the PD controller for following the heading
+float lastError = 0.0; // Used to calculate the D part of the PID controller for following the line
+float totalError = 0.0; // Used to calculate the I part of the PID controller for following the line
+float lastHeadingError = 0.0; // Used to calculate the D part of the PID controller for following the heading
+float totalHeadingError = 0.0; // // Used to calculate the I part of the PID controller for following the heading
 unsigned long lastTime = 0;
 String btnMsg = " ";
 
@@ -116,7 +120,7 @@ void loop()
 
     // Follow the line
     case FOLLOW:
-      follow(P_FOLLOW,D_FOLLOW,BASE_SPEED);
+      follow(P_FOLLOW,D_FOLLOW,I_FOLLOW,BASE_SPEED);
       if (crashed()) {
          state = CRASH;
       }
@@ -160,7 +164,7 @@ void loop()
 
     case GYRO_HOME:
       // Should just drive straight home
-      if (driveToDistanceHeading(P_GYRO_DRIVE,D_GYRO_DRIVE,60,210-30,BASE_SPEED)) { // Heading is either theta or -theta
+      if (driveToDistanceHeading(P_GYRO_DRIVE,D_GYRO_DRIVE,I_GYRO_DRIVE,60,210-20,BASE_SPEED)) { // Heading is either theta or -theta
         state = DONE;
       };
     break;
@@ -173,7 +177,7 @@ void loop()
     break;
 
     case FOLLOW_HOME:
-      follow(P_FOLLOW+.01,D_FOLLOW,BASE_SPEED+10);   // Follow a little faster on the way back
+      follow(P_FOLLOW+.01,D_FOLLOW,I_FOLLOW,BASE_SPEED+10);   // Follow a little faster on the way back
     break;
 
     case DONE:	/* Halt motors */
@@ -193,7 +197,7 @@ boolean crashed()
  return (isBumpSwitchPressed(2) || isBumpSwitchPressed(3));
 }
 
-void follow(float kP, float kD, int myBaseSpeed)
+void follow(float kP, float kD, float kI, int myBaseSpeed)
 {
 	/* Valid values are either:
 	 *  DARK_LINE  if your floor is lighter than your line
@@ -217,8 +221,10 @@ void follow(float kP, float kD, int myBaseSpeed)
 
   /* PD controller error calculation */
   int error = linePos - GOAL;
-  int motor_speed_delta = kP*error + kD*(error-lastError);
+
+  int motor_speed_delta = kP*error + kD*(error-lastError) + kI*(1/totalError);
   lastError = error;
+  totalError += error;
     
     Serial.print(linePos);
     Serial.print(", ");
@@ -240,15 +246,16 @@ void follow(float kP, float kD, int myBaseSpeed)
 /*
  * Drive distance
  */
-boolean driveToDistanceHeading(float kP, float kD, float inches, int desiredHeading, int speed) {
+boolean driveToDistanceHeading(float kP, float kD, float kI, float inches, int desiredHeading, int speed) {
   uint16_t ticks = distanceToEncoder(wheelDiameter, cntPerRevolution, inches);
 
   int headingError = calculateDifferenceBetweenAngles(desiredHeading, getCurrentRealtiveHeadingToStart());
   Serial.print("Drive: Heading Error");
   Serial.println(headingError);
-
-  int adjustSpeed = headingError * kP + kD * lastHeadingError;
+  
+  int adjustSpeed = headingError * kP + kD * lastHeadingError + kI*(1/totalHeadingError);
   lastHeadingError = headingError;
+  totalHeadingError += headingError;
   
   adjustSpeed = constrain(adjustSpeed,-10,10);
   /* Set motor speed */
